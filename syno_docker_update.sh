@@ -985,20 +985,24 @@ execute_update_script() {
     # File to edit
     file="${SYNO_DOCKER_SCRIPT}"
 
-    # Search and check conditions
-    if ! grep -q 'iptables -P FORWARD ACCEPT' "${file}"; then
-      match="^[[:space:]]*# start docker[[:space:]]*$"
-      # Use sed to append the lines before the match
+    # Remove any previously-inserted forwarding block, wherever it landed.
+    # Older versions of this script inserted it before 'start_docker_daemon',
+    # where the DOCKER-FORWARD chain does not yet exist. Only the iptables
+    # FORWARD lines (and the comment directly above them) are removed; the
+    # identically-commented insmod block is left untouched.
+    sed -i '/^[[:space:]]*iptables -C FORWARD -j DOCKER-FORWARD/d' "${file}"
+    sed -i '/^[[:space:]]*# Added by docker update[[:space:]]*$/{N;/\n[[:space:]]*iptables -P FORWARD ACCEPT/d}' "${file}"
+    sed -i '/^[[:space:]]*iptables -P FORWARD ACCEPT[[:space:]]*$/d' "${file}"
+
+    # Insert only after the daemon is confirmed up. dockerd creates the
+    # DOCKER-FORWARD chain, so the jump rule cannot be added any earlier.
+    match="^[[:space:]]*[$]DockerUpdaterBin postdaemonup[[:space:]]*$"
+    if grep -qE "${match}" "${file}"; then
       sed -i "/${match}/i\\${SYNO_DOCKER_SCRIPT_FORWARDING}" "${file}"
-      echo "Added missing IP forwarding configuration to ${file}."
+      echo "Added IP forwarding configuration to ${file} (post daemon start)."
     else
-      echo "IP forwarding is already enabled in ${file}."
-    fi
-    # Ensure DOCKER-FORWARD jump rule is present (Docker v25+ compatibility)
-    if ! grep -q 'DOCKER-FORWARD' "${file}"; then
-      match="^[[:space:]]*iptables -P FORWARD ACCEPT"
-      sed -i "/${match}/a\\          iptables -C FORWARD -j DOCKER-FORWARD 2>/dev/null || iptables -I FORWARD 1 -j DOCKER-FORWARD" "${file}"
-      echo "Added DOCKER-FORWARD jump rule to ${file}."
+      echo "WARNING: anchor '\$DockerUpdaterBin postdaemonup' not found in ${file}."
+      echo "         IP forwarding configuration was NOT added — check the file manually."
     fi
   else
     echo "Skipping configuration in STAGE mode"
