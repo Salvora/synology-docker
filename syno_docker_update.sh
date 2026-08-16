@@ -148,6 +148,7 @@ usage() {
   echo "  restore                Restore Docker and Docker Compose from backup"
   echo "  update                 Update Docker and Docker Compose to target version (creates backup first)"
   echo "  logger                 Update ONLY the logging driver to the local logger (a proactive preparation step)"
+  echo "  only_script            Update ONLY the start-stop-status IP forwarding block (no binaries, no restart)"
   echo "  validate               Validates versions available for update"
   echo
 }
@@ -973,6 +974,13 @@ execute_update_log() {
 #======================================================================================================================
 # Updates Synology's start-stop-status script for Docker to ensure IP forwarding is enabled, unless 'stage' is set to
 # true.
+#
+# The forwarding block MUST be inserted after 'start_docker_daemon' has completed. The DOCKER-FORWARD chain is created
+# by dockerd itself, so inserting the jump rule any earlier means 'iptables -C FORWARD -j DOCKER-FORWARD' fails (the
+# chain does not exist) and the fallback 'iptables -I FORWARD 1 -j DOCKER-FORWARD' fails too. dockerd then sets the
+# FORWARD policy to DROP, leaving a DROP policy with no jump - published container ports become unreachable from other
+# hosts after every clean boot, while working again after any subsequent Container Manager restart (because dockerd
+# already exists by then). That masking is what makes the bug look intermittent when it is actually deterministic.
 #======================================================================================================================
 # Globals:
 #   - stage
@@ -985,24 +993,23 @@ execute_update_script() {
     # File to edit
     file="${SYNO_DOCKER_SCRIPT}"
 
-    # Remove any previously-inserted forwarding block, wherever it landed.
-    # Older versions of this script inserted it before 'start_docker_daemon',
-    # where the DOCKER-FORWARD chain does not yet exist. Only the iptables
-    # FORWARD lines (and the comment directly above them) are removed; the
-    # identically-commented insmod block is left untouched.
+    # Remove any previously-inserted forwarding block, wherever it landed. Older versions of this script (and
+    # fix_ipforward.sh / switch_forward.sh) inserted it before 'start_docker_daemon'. Only the iptables FORWARD lines
+    # (and the comment directly above them) are removed; the identically-commented insmod block added by
+    # install_iptables_modules.sh is left untouched.
     sed -i '/^[[:space:]]*iptables -C FORWARD -j DOCKER-FORWARD/d' "${file}"
+    sed -i '/^[[:space:]]*iptables -[ID] FORWARD -[io] docker0 -j ACCEPT[[:space:]]*$/d' "${file}"
     sed -i '/^[[:space:]]*# Added by docker update[[:space:]]*$/{N;/\n[[:space:]]*iptables -P FORWARD ACCEPT/d}' "${file}"
     sed -i '/^[[:space:]]*iptables -P FORWARD ACCEPT[[:space:]]*$/d' "${file}"
 
-    # Insert only after the daemon is confirmed up. dockerd creates the
-    # DOCKER-FORWARD chain, so the jump rule cannot be added any earlier.
+    # Insert only after the daemon is confirmed up.
     match="^[[:space:]]*[$]DockerUpdaterBin postdaemonup[[:space:]]*$"
     if grep -qE "${match}" "${file}"; then
       sed -i "/${match}/i\\${SYNO_DOCKER_SCRIPT_FORWARDING}" "${file}"
       echo "Added IP forwarding configuration to ${file} (post daemon start)."
     else
       echo "WARNING: anchor '\$DockerUpdaterBin postdaemonup' not found in ${file}."
-      echo "         IP forwarding configuration was NOT added — check the file manually."
+      echo "         IP forwarding configuration was NOT added -- check the file manually."
     fi
   else
     echo "Skipping configuration in STAGE mode"
@@ -1107,7 +1114,7 @@ install_modules() {
   print_status "Checking for / Installing iptables modules."
   if [[ "${install_iptables_modules}" == 'true' ]]; then
   echo "   Based on this version of docker, we'll need to check for / install iptables modules..."
-  ./install_iptables_modules.sh || terminate "Could not install iptables modules. Stopping."
+  "${SCRIPT_DIR}/install_iptables_modules.sh" || terminate "Could not install iptables modules. Stopping."
   fi
 }
 
