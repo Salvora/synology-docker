@@ -24,6 +24,16 @@ else
   exit 0
 fi
 
+# Verify the insertion anchor exists before touching the file, so a missing anchor leaves
+# the file unmodified. dockerd creates the DOCKER-FORWARD chain, so the jump rule cannot be
+# added any earlier than this anchor.
+match="^[[:space:]]*[$]DockerUpdaterBin postdaemonup[[:space:]]*$"
+if ! grep -qE "${match}" "${file}"; then
+  echo "WARNING: anchor '\$DockerUpdaterBin postdaemonup' not found in ${file}."
+  echo "         File left unmodified -- check the file manually."
+  exit 1
+fi
+
 # Remove the existing forwarding block, wherever it landed. Earlier versions inserted it before
 # 'start_docker_daemon', where the DOCKER-FORWARD chain does not yet exist. The insmod block
 # sharing the same comment is left untouched.
@@ -32,15 +42,6 @@ sed -i '/^[[:space:]]*# Added by docker update[[:space:]]*$/{N;/\n[[:space:]]*ip
 sed -i '/^[[:space:]]*# Added by docker update[[:space:]]*$/{N;/\n[[:space:]]*iptables -I FORWARD -i docker0/d}' "${file}"
 sed -i '/^[[:space:]]*iptables -[ID] FORWARD -[io] docker0 -j ACCEPT[[:space:]]*$/d' "${file}"
 sed -i '/^[[:space:]]*iptables -P FORWARD ACCEPT[[:space:]]*$/d' "${file}"
-
-# Insert only after the daemon is confirmed up. dockerd creates the DOCKER-FORWARD chain, so the
-# jump rule cannot be added any earlier.
-match="^[[:space:]]*[$]DockerUpdaterBin postdaemonup[[:space:]]*$"
-if ! grep -qE "${match}" "${file}"; then
-  echo "WARNING: anchor '\$DockerUpdaterBin postdaemonup' not found in ${file}."
-  echo "         Forwarding configuration was NOT added -- check the file manually."
-  exit 1
-fi
 
 if [ "${mode}" = "accept" ]; then
   echo "Found FORWARD ACCEPT policy in start-stop-status script..."
