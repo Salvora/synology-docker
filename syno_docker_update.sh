@@ -112,6 +112,7 @@ step=0
 total_steps=0
 install_iptables_modules='false'
 skip_iptables_modules='false'
+install_apparmor='false'
 
 
 #======================================================================================================================
@@ -534,6 +535,10 @@ define_update() {
     major="${target_docker_version%%.*}"
     if [[ "$major" -ge 28 && "${skip_iptables_modules}" = 'false' ]]; then
       install_iptables_modules='true'
+      total_steps=$((total_steps+1))
+    fi
+    if [[ "$major" -ge 29 ]]; then
+      install_apparmor='true'
       total_steps=$((total_steps+1))
     fi
     if [ "${docker_version}" = "${target_docker_version}" ] && [ "${skip_docker_update}" = 'false' ] ; then
@@ -1118,6 +1123,21 @@ install_modules() {
 }
 
 #======================================================================================================================
+# Installs a docker-default AppArmor profile for v29+ (see install_apparmor_profile.sh)
+#======================================================================================================================
+# Globals:
+#   - install_apparmor
+# Outputs:
+#   profile installed and loaded, start script modified (if necessary)
+#======================================================================================================================
+install_apparmor_profile() {
+  if [[ "${install_apparmor}" == 'true' ]]; then
+    print_status "Installing docker-default AppArmor profile."
+    bash "${SCRIPT_DIR}/install_apparmor_profile.sh" || terminate "Could not install AppArmor profile. Stopping."
+  fi
+}
+
+#======================================================================================================================
 # Removes the temp folder.
 #======================================================================================================================
 # Globals:
@@ -1293,6 +1313,7 @@ main() {
       execute_install_bin
       execute_update_log
       execute_update_script
+      install_apparmor_profile
       execute_start_syno
       execute_clean
       ;;
