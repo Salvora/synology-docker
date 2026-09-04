@@ -997,23 +997,25 @@ execute_update_script() {
     # File to edit
     file="${SYNO_DOCKER_SCRIPT}"
 
-    # Remove any previously-inserted forwarding block, wherever it landed. Older versions of this script (and
-    # fix_ipforward.sh / switch_forward.sh) inserted it before 'start_docker_daemon'. Only the iptables FORWARD lines
-    # (and the comment directly above them) are removed; the identically-commented insmod block added by
-    # install_iptables_modules.sh is left untouched.
-    sed -i '/^[[:space:]]*iptables -C FORWARD -j DOCKER-FORWARD/d' "${file}"
-    sed -i '/^[[:space:]]*iptables -[ID] FORWARD -[io] docker0 -j ACCEPT[[:space:]]*$/d' "${file}"
-    sed -i '/^[[:space:]]*# Added by docker update[[:space:]]*$/{N;/\n[[:space:]]*iptables -P FORWARD ACCEPT/d}' "${file}"
-    sed -i '/^[[:space:]]*iptables -P FORWARD ACCEPT[[:space:]]*$/d' "${file}"
-
-    # Insert only after the daemon is confirmed up.
+    # Verify the insertion anchor exists before touching the file, so a missing anchor leaves
+    # the file unmodified.
     match="^[[:space:]]*[$]DockerUpdaterBin postdaemonup[[:space:]]*$"
     if grep -qE "${match}" "${file}"; then
+      # Remove any previously-inserted forwarding block, wherever it landed. Older versions of this script (and
+      # fix_ipforward.sh / switch_forward.sh) inserted it before 'start_docker_daemon'. Only the iptables FORWARD lines
+      # (and the comment directly above them) are removed; the identically-commented insmod block added by
+      # install_iptables_modules.sh is left untouched.
+      sed -i '/^[[:space:]]*iptables -C FORWARD -j DOCKER-FORWARD/d' "${file}"
+      sed -i '/^[[:space:]]*iptables -[ID] FORWARD -[io] docker0 -j ACCEPT[[:space:]]*$/d' "${file}"
+      sed -i '/^[[:space:]]*# Added by docker update[[:space:]]*$/{N;/\n[[:space:]]*iptables -P FORWARD ACCEPT/d}' "${file}"
+      sed -i '/^[[:space:]]*iptables -P FORWARD ACCEPT[[:space:]]*$/d' "${file}"
+
+      # Insert only after the daemon is confirmed up.
       sed -i "/${match}/i\\${SYNO_DOCKER_SCRIPT_FORWARDING}" "${file}"
       echo "Added IP forwarding configuration to ${file} (post daemon start)."
     else
       echo "WARNING: anchor '\$DockerUpdaterBin postdaemonup' not found in ${file}."
-      echo "         IP forwarding configuration was NOT added -- check the file manually."
+      echo "         File left unmodified -- check the file manually."
     fi
   else
     echo "Skipping configuration in STAGE mode"
