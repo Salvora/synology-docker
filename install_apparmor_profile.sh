@@ -63,8 +63,8 @@ PROFILE_EOF
 echo " - profile written to ${PROFILE}"
 
 # Load it now (replace if already loaded)
-if ! apparmor_parser -Kr "${PROFILE}"; then
-  echo "ERROR: apparmor_parser could not load ${PROFILE}"
+if ! /sbin/apparmor_parser -Kr "${PROFILE}"; then
+  echo "ERROR: /sbin/apparmor_parser could not load ${PROFILE}"
   exit 1
 fi
 if ! grep -q 'docker-default' /sys/kernel/security/apparmor/profiles; then
@@ -76,7 +76,7 @@ echo " - docker-default profile loaded ? 🟢"
 # Load it at every ContainerManager start, before dockerd. The profile is
 # consumed by dockerd, so unlike the FORWARD rules this must run pre-daemon.
 if ! grep -q 'docker-default.profile' "${SSS}"; then
-  INSERT="            # Added by docker update\n            [ -f ${PROFILE} ] && apparmor_parser -Kr ${PROFILE}"
+  INSERT="            # Added by docker update\n            [ -f \"${PROFILE}\" ] && /sbin/apparmor_parser -Kr \"${PROFILE}\""
   match="^[[:space:]]*# start docker[[:space:]]*$"
   sed -i "/${match}/i\\${INSERT}" "${SSS}"
   if grep -q 'docker-default.profile' "${SSS}"; then
